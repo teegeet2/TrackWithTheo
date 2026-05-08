@@ -695,8 +695,8 @@
       </button>
     </div>
     <div class="form-group" style="margin-top:12px">
-      <label for="portion-grams">Estimated Portion (grams)</label>
-      <input id="portion-grams" type="number" min="50" max="1000" step="10" value="250" />
+      <label for="portion-grams">AI Estimated Portion (grams)</label>
+      <input id="portion-grams" type="number" min="50" max="1000" step="10" value="250" readonly />
     </div>
 
     <div id="result-container"></div>
@@ -788,6 +788,8 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
 <script>
 // ============================================================
 // LOCAL AI ANALYSIS (NO API KEYS)
@@ -821,6 +823,8 @@ let currentImageMimeType = 'image/jpeg';
 let currentPage = 'dash';
 let localFoodModel = null;
 let localFoodModelPromise = null;
+let localProduceModel = null;
+let localProduceModelPromise = null;
 let foodClassifierLib = null;
 
 // ============================================================
@@ -864,13 +868,29 @@ function showAuthError(msg) {
   el.classList.add('show');
 }
 
+function normalizeEmail(email) {
+  return (email || '').trim().toLowerCase();
+}
+
+function encodePassword(password) {
+  return btoa(unescape(encodeURIComponent(password || '')));
+}
+
+function passwordMatches(user, rawPassword) {
+  const encoded = encodePassword(rawPassword);
+  return user?.password === encoded || user?.password === btoa(rawPassword || '') || user?.password === rawPassword;
+}
+
 function handleLogin() {
-  const email = document.getElementById('login-email').value.trim();
+  const email = normalizeEmail(document.getElementById('login-email').value);
   const password = document.getElementById('login-password').value;
   if (!email || !password) { showAuthError('Please fill in all fields.'); return; }
   const users = JSON.parse(localStorage.getItem('twt_users') || '[]');
-  const user = users.find(u => u.email === email && u.password === btoa(password));
+  const user = users.find(u => normalizeEmail(u.email) === email && passwordMatches(u, password));
   if (!user) { showAuthError('Invalid email or password.'); return; }
+  user.email = normalizeEmail(user.email);
+  user.password = encodePassword(password);
+  localStorage.setItem('twt_users', JSON.stringify(users));
   currentUser = user;
   localStorage.setItem('twt_session', JSON.stringify(user));
   if (!user.profile) showScreen('onboarding-screen');
@@ -879,13 +899,13 @@ function handleLogin() {
 
 function handleSignup() {
   const name = document.getElementById('signup-name').value.trim();
-  const email = document.getElementById('signup-email').value.trim();
+  const email = normalizeEmail(document.getElementById('signup-email').value);
   const password = document.getElementById('signup-password').value;
   if (!name || !email || !password) { showAuthError('Please fill in all fields.'); return; }
   if (password.length < 6) { showAuthError('Password must be at least 6 characters.'); return; }
   const users = JSON.parse(localStorage.getItem('twt_users') || '[]');
-  if (users.find(u => u.email === email)) { showAuthError('Account already exists with this email.'); return; }
-  const user = { id: Date.now().toString(), name, email, password: btoa(password), profile: null, meals: [] };
+  if (users.find(u => normalizeEmail(u.email) === email)) { showAuthError('Account already exists with this email.'); return; }
+  const user = { id: Date.now().toString(), name, email, password: encodePassword(password), profile: null, meals: [] };
   users.push(user);
   localStorage.setItem('twt_users', JSON.stringify(users));
   currentUser = user;
@@ -1282,18 +1302,78 @@ async function getMultiViewPredictions(model, imageEl) {
 function getNutritionForFood(label) {
   const l = normalizeLabel(label);
   const table = {
+    apple_pie: { calories: 237, protein: 2, carbs: 34, fat: 11 },
+    baby_back_ribs: { calories: 320, protein: 20, carbs: 5, fat: 24 },
+    baklava: { calories: 428, protein: 6, carbs: 44, fat: 26 },
+    beef_carpaccio: { calories: 180, protein: 22, carbs: 1, fat: 9 },
+    beef_tartare: { calories: 180, protein: 20, carbs: 2, fat: 10 },
+    beet_salad: { calories: 120, protein: 3, carbs: 13, fat: 6 },
+    bibimbap: { calories: 180, protein: 7, carbs: 24, fat: 6 },
+    caesar_salad: { calories: 190, protein: 8, carbs: 8, fat: 14 },
+    caprese_salad: { calories: 170, protein: 8, carbs: 4, fat: 13 },
+    carrot_cake: { calories: 408, protein: 4, carbs: 49, fat: 21 },
+    ceviche: { calories: 120, protein: 18, carbs: 6, fat: 3 },
+    cheesecake: { calories: 321, protein: 6, carbs: 25, fat: 22 },
+    chicken_curry: { calories: 190, protein: 16, carbs: 8, fat: 10 },
+    chicken_quesadilla: { calories: 300, protein: 15, carbs: 22, fat: 17 },
+    chicken_wings: { calories: 290, protein: 22, carbs: 6, fat: 20 },
+    chocolate_cake: { calories: 371, protein: 5, carbs: 53, fat: 15 },
+    clam_chowder: { calories: 80, protein: 4, carbs: 8, fat: 4 },
+    club_sandwich: { calories: 280, protein: 15, carbs: 26, fat: 14 },
+    crab_cakes: { calories: 220, protein: 14, carbs: 10, fat: 14 },
+    donuts: { calories: 452, protein: 4, carbs: 51, fat: 25 },
+    dumplings: { calories: 190, protein: 7, carbs: 27, fat: 6 },
+    edamame: { calories: 121, protein: 11, carbs: 9, fat: 5 },
+    filet_mignon: { calories: 250, protein: 25, carbs: 0, fat: 16 },
+    fish_and_chips: { calories: 232, protein: 13, carbs: 22, fat: 10 },
+    french_fries: { calories: 312, protein: 3, carbs: 41, fat: 15 },
+    french_toast: { calories: 250, protein: 8, carbs: 33, fat: 9 },
+    fried_rice: { calories: 250, protein: 6, carbs: 45, fat: 6 },
+    gnocchi: { calories: 160, protein: 4, carbs: 33, fat: 1 },
+    greek_salad: { calories: 150, protein: 4, carbs: 8, fat: 11 },
+    grilled_cheese_sandwich: { calories: 291, protein: 11, carbs: 27, fat: 16 },
+    grilled_salmon: { calories: 208, protein: 22, carbs: 0, fat: 13 },
+    hamburger: { calories: 295, protein: 17, carbs: 30, fat: 13 },
+    hot_dog: { calories: 290, protein: 10, carbs: 18, fat: 18 },
+    hummus: { calories: 166, protein: 8, carbs: 14, fat: 10 },
+    ice_cream: { calories: 207, protein: 3, carbs: 24, fat: 11 },
+    lasagna: { calories: 260, protein: 14, carbs: 18, fat: 15 },
+    lobster_bisque: { calories: 110, protein: 7, carbs: 8, fat: 5 },
+    lobster_roll_sandwich: { calories: 260, protein: 13, carbs: 20, fat: 14 },
+    macaroni_and_cheese: { calories: 164, protein: 7, carbs: 20, fat: 6 },
+    miso_soup: { calories: 35, protein: 2, carbs: 4, fat: 1 },
+    nachos: { calories: 346, protein: 8, carbs: 36, fat: 19 },
+    omelette: { calories: 154, protein: 11, carbs: 2, fat: 11 },
+    onion_rings: { calories: 276, protein: 4, carbs: 35, fat: 13 },
+    pad_thai: { calories: 160, protein: 7, carbs: 24, fat: 4 },
+    paella: { calories: 158, protein: 9, carbs: 17, fat: 6 },
+    pancakes: { calories: 227, protein: 6, carbs: 28, fat: 10 },
+    peking_duck: { calories: 337, protein: 19, carbs: 5, fat: 26 },
+    pho: { calories: 95, protein: 6, carbs: 11, fat: 3 },
     pizza: { calories: 285, protein: 12, carbs: 36, fat: 10 },
+    pork_chop: { calories: 231, protein: 25, carbs: 0, fat: 14 },
+    poutine: { calories: 280, protein: 6, carbs: 30, fat: 14 },
+    prime_rib: { calories: 291, protein: 24, carbs: 0, fat: 21 },
+    pulled_pork_sandwich: { calories: 250, protein: 15, carbs: 23, fat: 11 },
     hamburger: { calories: 295, protein: 17, carbs: 30, fat: 13 },
     cheeseburger: { calories: 303, protein: 17, carbs: 30, fat: 15 },
-    french_fries: { calories: 312, protein: 3, carbs: 41, fat: 15 },
     hot_dog: { calories: 290, protein: 10, carbs: 18, fat: 18 },
-    fried_rice: { calories: 250, protein: 6, carbs: 45, fat: 6 },
-    sushi: { calories: 200, protein: 9, carbs: 32, fat: 3 },
+    ramen: { calories: 436, protein: 16, carbs: 62, fat: 14 },
+    ravioli: { calories: 154, protein: 6, carbs: 23, fat: 4 },
+    risotto: { calories: 166, protein: 4, carbs: 25, fat: 5 },
     sashimi: { calories: 160, protein: 25, carbs: 0, fat: 5 },
+    seaweed_salad: { calories: 90, protein: 3, carbs: 12, fat: 3 },
     spaghetti_bolognese: { calories: 210, protein: 10, carbs: 28, fat: 7 },
+    spaghetti_carbonara: { calories: 310, protein: 12, carbs: 30, fat: 16 },
+    spring_rolls: { calories: 154, protein: 5, carbs: 21, fat: 5 },
+    steak: { calories: 271, protein: 26, carbs: 0, fat: 18 },
+    sushi: { calories: 200, protein: 9, carbs: 32, fat: 3 },
+    tacos: { calories: 226, protein: 9, carbs: 21, fat: 12 },
+    tiramisu: { calories: 283, protein: 4, carbs: 31, fat: 16 },
+    waffles: { calories: 291, protein: 8, carbs: 33, fat: 14 },
+    sushi: { calories: 200, protein: 9, carbs: 32, fat: 3 },
     carbonara: { calories: 310, protein: 12, carbs: 30, fat: 16 },
     lasagna: { calories: 260, protein: 14, carbs: 18, fat: 15 },
-    ramen: { calories: 436, protein: 16, carbs: 62, fat: 14 },
     salad: { calories: 120, protein: 5, carbs: 10, fat: 7 },
     caesar_salad: { calories: 190, protein: 8, carbs: 8, fat: 14 },
     greek_salad: { calories: 150, protein: 4, carbs: 8, fat: 11 },
@@ -1336,7 +1416,28 @@ function getNutritionForFood(label) {
     { k: ['pizza'], v: { calories: 285, protein: 12, carbs: 36, fat: 10 } }
   ];
   const fb = fallbackByKeyword.find(x => x.k.some(k => l.includes(k)));
-  return fb ? fb.v : { calories: 190, protein: 9, carbs: 20, fat: 8 };
+  return fb ? fb.v : { calories: 180, protein: 10, carbs: 18, fat: 7 };
+}
+
+function mapProduceLabel(label) {
+  const l = normalizeLabel(label);
+  if (l.includes('orange')) return 'orange';
+  if (l.includes('banana')) return 'banana';
+  if (l.includes('apple')) return 'apple';
+  if (l.includes('broccoli')) return 'broccoli';
+  if (l.includes('carrot')) return 'carrot';
+  if (l.includes('lemon')) return 'lemon';
+  if (l.includes('pineapple')) return 'pineapple';
+  if (l.includes('strawberry')) return 'strawberry';
+  if (l.includes('grape')) return 'grapes';
+  if (l.includes('pear')) return 'pear';
+  if (l.includes('peach')) return 'peach';
+  return null;
+}
+
+async function getProducePredictions(model, imageEl) {
+  const preds = await model.classify(imageEl, 6);
+  return preds.map(p => ({ className: mapProduceLabel(p.className) || normalizeLabel(p.className), probability: p.probability }));
 }
 
 function getPortionGrams() {
@@ -1345,7 +1446,53 @@ function getPortionGrams() {
   return Math.min(1000, val);
 }
 
-function estimateNutritionFromPredictions(predictions) {
+function getFoodDensityMultiplier(foodName) {
+  const f = normalizeLabel(foodName);
+  if (f.includes('salad') || f.includes('soup')) return 0.75;
+  if (f.includes('apple') || f.includes('orange') || f.includes('banana') || f.includes('pear') || f.includes('peach')) return 0.65;
+  if (f.includes('fish') || f.includes('chicken') || f.includes('beef') || f.includes('steak')) return 1.05;
+  if (f.includes('burger') || f.includes('pizza') || f.includes('sandwich') || f.includes('burrito')) return 1.2;
+  if (f.includes('cake') || f.includes('donut') || f.includes('cheesecake')) return 1.1;
+  return 1.0;
+}
+
+function estimateFoodCoverage(imageEl) {
+  const c = document.createElement('canvas');
+  c.width = 224;
+  c.height = 224;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(imageEl, 0, 0, 224, 224);
+  const data = ctx.getImageData(0, 0, 224, 224).data;
+  let foodPixels = 0;
+  let nonBgPixels = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i] / 255;
+    const g = data[i + 1] / 255;
+    const b = data[i + 2] / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const nonBg = lum > 0.08 && lum < 0.95;
+    if (nonBg) nonBgPixels++;
+    if (nonBg && (sat > 0.12 || lum < 0.75)) foodPixels++;
+  }
+  if (!nonBgPixels) return 0.45;
+  return Math.min(0.95, Math.max(0.15, foodPixels / nonBgPixels));
+}
+
+function estimateAutoPortionGrams(imageEl, topFoods, confidence) {
+  const coverage = estimateFoodCoverage(imageEl);
+  const avgDensity = topFoods.length
+    ? topFoods.reduce((s, f) => s + getFoodDensityMultiplier(f.name), 0) / topFoods.length
+    : 1;
+  // Base: a full framed plate-like meal ~420g
+  let grams = 90 + (coverage * 420 * avgDensity);
+  grams *= (0.8 + confidence * 0.35);
+  return Math.max(60, Math.min(900, Math.round(grams / 10) * 10));
+}
+
+function estimateNutritionFromPredictions(predictions, producePredictions = [], imageEl = null) {
   const scoreMap = {};
   for (const p of predictions) {
     const label = normalizeLabel(p.className);
@@ -1353,6 +1500,33 @@ function estimateNutritionFromPredictions(predictions) {
     if (!nutrition) continue;
     if (!scoreMap[label]) scoreMap[label] = { name: label, nutrition, score: 0 };
     scoreMap[label].score += p.probability;
+  }
+  for (const p of producePredictions) {
+    const label = normalizeLabel(p.className);
+    const nutrition = getNutritionForFood(label);
+    if (!nutrition) continue;
+    if (!scoreMap[label]) scoreMap[label] = { name: label, nutrition, score: 0 };
+    // Give produce model higher weight for single fruits/veg (fixes orange/lobster issue)
+    scoreMap[label].score += p.probability * 1.6;
+  }
+  if (producePredictions.length) {
+    const topProduce = [...producePredictions].sort((a, b) => b.probability - a.probability)[0];
+    const mapped = topProduce ? normalizeLabel(topProduce.className) : '';
+    if (topProduce && topProduce.probability >= 0.52 && getNutritionForFood(mapped)) {
+      const nutrition = getNutritionForFood(mapped);
+      scoreMap[mapped] = { name: mapped, nutrition, score: Math.max((scoreMap[mapped]?.score || 0), topProduce.probability * 3.2) };
+    }
+  }
+  // Conflict correction: if produce is very confident, suppress unlikely seafood override.
+  const topProduce = producePredictions.length ? [...producePredictions].sort((a, b) => b.probability - a.probability)[0] : null;
+  const produceName = topProduce ? normalizeLabel(topProduce.className) : '';
+  const produceStrong = topProduce && topProduce.probability >= 0.6;
+  if (produceStrong && (produceName.includes('orange') || produceName.includes('banana') || produceName.includes('apple'))) {
+    Object.keys(scoreMap).forEach(k => {
+      if (k.includes('lobster') || k.includes('crab') || k.includes('oyster') || k.includes('mussel')) {
+        scoreMap[k].score *= 0.15;
+      }
+    });
   }
   const ranked = Object.values(scoreMap).sort((a, b) => b.score - a.score);
   if (ranked.length === 0) {
@@ -1377,7 +1551,9 @@ function estimateNutritionFromPredictions(predictions) {
     return acc;
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
   const confidence = Math.min(1, top[0].score / 2.2);
-  const grams = getPortionGrams();
+  const grams = imageEl ? estimateAutoPortionGrams(imageEl, top, confidence) : getPortionGrams();
+  const gramsInput = document.getElementById('portion-grams');
+  if (gramsInput) gramsInput.value = String(grams);
   const scale = grams / 100;
 
   return {
@@ -1386,7 +1562,7 @@ function estimateNutritionFromPredictions(predictions) {
     protein: Math.round(per100.protein * scale),
     carbs: Math.round(per100.carbs * scale),
     fat: Math.round(per100.fat * scale),
-    notes: `Local Food-101 model: ${top.map(i => i.name).join(' + ')} (${Math.round(confidence * 100)}% confidence, ${grams}g portion)`
+    notes: `Local AI: ${top.map(i => i.name).join(' + ')} (${Math.round(confidence * 100)}% confidence, auto ${grams}g)`
   };
 }
 
@@ -1421,6 +1597,20 @@ async function loadLocalFoodModel() {
   return localFoodModelPromise;
 }
 
+async function loadLocalProduceModel() {
+  if (localProduceModel) return localProduceModel;
+  if (!localProduceModelPromise) {
+    localProduceModelPromise = mobilenet.load({ version: 2, alpha: 1.0 }).then(model => {
+      localProduceModel = model;
+      return model;
+    }).catch(err => {
+      localProduceModelPromise = null;
+      throw err;
+    });
+  }
+  return localProduceModelPromise;
+}
+
 async function analyzeImage() {
   if (!currentImageBase64) {
     showToast('Please upload an image first', 'error');
@@ -1441,7 +1631,14 @@ async function analyzeImage() {
     const imageEl = document.querySelector('#upload-zone img');
     if (!imageEl) throw new Error('No image to analyze');
     const predictions = await getMultiViewPredictions(model, imageEl);
-    const result = estimateNutritionFromPredictions(predictions);
+    let producePredictions = [];
+    try {
+      const produceModel = await loadLocalProduceModel();
+      producePredictions = await getProducePredictions(produceModel, imageEl);
+    } catch (_) {
+      producePredictions = [];
+    }
+    const result = estimateNutritionFromPredictions(predictions, producePredictions, imageEl);
     await setCachedAnalysis(currentImageBase64, result);
     hideLoading();
     displayResult(result);
